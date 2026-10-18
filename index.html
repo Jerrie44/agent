@@ -263,7 +263,9 @@ function joint(md,side,{win=false,minTotal=0,margin=0,share=0,share2=0}){
     P+=md.A[i]*md.B[j]*(share?1-Math.pow(1-share,f):1)*(share2?1-Math.pow(1-share2,f):1);}
   return P;}
 // joueurs : stats saison (g, a, md) + forme sur les derniers matchs (l5g, l5a, l5n) quand on l'a ; blessés exclus
-function teamPlayers(team){return (players[team]||[]).filter(p=>!p.out&&p.md>=3).map(p=>{
+function teamPlayers(team){const all=players[team]||[],mx=Math.max(0,...all.map(p=>p.md||0));
+  // seulement les joueurs qui jouent souvent (au moins 60 % des matchs de l'équipe)
+  return all.filter(p=>!p.out&&p.md>=Math.max(3,.6*mx)).map(p=>{
   const rec=p.l5n>0,rg=rec?.5*p.g/p.md+.5*p.l5g/p.l5n:p.g/p.md,ra=rec?.5*p.a/p.md+.5*p.l5a/p.l5n:p.a/p.md;
   return {...p,rg,ra,sg:Math.min(.55,rg/1.7),sa:Math.min(.45,ra/1.7),sd:Math.min(.7,(rg+ra)/1.7)};}).sort((x,y)=>(y.rg+y.ra)-(x.rg+x.ra));}
 const atLeast=L=>`Au moins ${Math.floor(L)+1} buts dans le match`, atMost=L=>`${Math.floor(L)} buts ou moins dans le match`;
@@ -297,7 +299,7 @@ function selectionsOf(m){
   const B=(key,picks,opt,why)=>add('MyMatch','mm-'+key,picks.join(' + '),joint(md,side,opt),{margin:M_BUILDER,builder:true,fav:true,picks,why});
   // forme : buteur si le joueur marque au moins 1 match sur 2, sinon décisif (but ou passe), plus probable
   // forme : buteur si le joueur enchaîne les buts, passeur s'il enchaîne les passes, sinon décisif (but ou passe), le plus probable
-  const star=teamPlayers(fav).filter(pl=>pl.g+pl.a>0).slice(0,3).map(pl=>{
+  const star=teamPlayers(fav).filter(pl=>pl.g+pl.a>0).slice(0,2).map(pl=>{
     const kind=pl.rg>=.45&&pl.rg>=1.5*pl.ra?'g':pl.ra>=.4&&pl.ra>=1.5*pl.rg?'a':'d';
     return {...pl,kind,pickG:kind==='g',pick:pl.name+(kind==='g'?' buteur':kind==='a'?' passeur décisif':' décisif (but ou passe)'),sh:kind==='g'?pl.sg:kind==='a'?pl.sa:pl.sd};});
   const form=pl=>pline(pl)+(pl.kind==='g'?' · en forme devant le but':pl.kind==='a'?' · en forme à la passe':'');
