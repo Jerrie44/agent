@@ -1,4 +1,4 @@
-const C='bb-v1';
+const C='bb-v2';
 self.addEventListener('install',e=>{self.skipWaiting();e.waitUntil(caches.open(C).then(c=>c.addAll(['./','index.html','manifest.webmanifest','icon-180.png'])));});
 self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));
 // réseau d'abord (cotes fraîches), cache seulement hors connexion

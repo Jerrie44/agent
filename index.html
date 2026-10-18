@@ -447,10 +447,9 @@ async function loadFeed(){
     renderAll();}catch(e){if(!feed)$('#fresh').textContent='Pas de connexion';}}
 
 async function liveScores(){
-  const days=[0,1].map(d=>{const x=new Date(now()+d*864e5);return x.toISOString().slice(0,10).replace(/-/g,'');});
   let got=0;
   await Promise.all(Object.values(ESPN).map(async lg=>{try{
-    const j=await getJSON(`https://site.api.espn.com/apis/site/v2/sports/soccer/${lg}/scoreboard?dates=${days[0]}-${days[1]}`);
+    const j=await getJSON(`https://site.api.espn.com/apis/site/v2/sports/soccer/${lg}/scoreboard`);
     for(const ev of j.events||[]){const c=ev.competitions&&ev.competitions[0];if(!c)continue;
       const H=c.competitors.find(x=>x.homeAway==='home'),A=c.competitors.find(x=>x.homeAway==='away');if(!H||!A)continue;
       const m=findMatch(H.team.displayName,A.team.displayName)||findMatch(H.team.shortDisplayName,A.team.shortDisplayName);if(!m)continue;
@@ -462,8 +461,14 @@ async function liveScores(){
 
 async function liveOdds(){
   let got=0;
-  try{const evs=await getJSON('https://gamma-api.polymarket.com/events?tag_slug=soccer&active=true&closed=false&limit=500');
-    for(const ev of evs||[]){const t=String(ev.title||'').split(/\s+vs\.?\s+/i);if(t.length!==2)continue;
+  // l'API renvoie 100 événements max par appel : une requête par championnat, fenêtre -3 h / +3 jours
+  const lo=new Date(Date.now()-3*3600e3).toISOString(),hi=new Date(Date.now()+3*864e5).toISOString();
+  const evs=[];
+  await Promise.all(['epl','ligue-1','la-liga','sea','bundesliga','ucl'].map(async tag=>{for(let o=0;o<300;o+=100){try{
+    const p=await getJSON(`https://gamma-api.polymarket.com/events?tag_slug=${tag}&closed=false&end_date_min=${lo}&start_date_max=${hi}&limit=100&offset=${o}`);
+    evs.push(...p);if(p.length<100)break;}catch(e){break;}}}));
+  try{
+    for(const ev of evs){if(/ - /.test(ev.title||''))continue;const t=String(ev.title||'').split(/\s+vs\.?\s+/i);if(t.length!==2)continue;
       const m=findMatch(t[0],t[1]);if(!m)continue;const p={};
       for(const mk of ev.markets||[]){if(mk.closed)continue;let yes;try{yes=+JSON.parse(mk.outcomePrices)[0];}catch(e){continue;}if(!(yes>=0&&yes<=1))continue;
         const lab=mk.groupItemTitle||mk.question||'';
