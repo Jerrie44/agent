@@ -260,14 +260,16 @@ function model(m){
 function joint(md,side,{win=false,minTotal=0,margin=0,share=0,share2=0}){
   let P=0;for(let i=0;i<=N;i++)for(let j=0;j<=N;j++){const f=side==='h'?i:j,o=side==='h'?j:i;
     if(win&&f<=o)continue;if(i+j<minTotal)continue;if(margin&&f-o<margin)continue;
-    P+=md.A[i]*md.B[j]*(share?1-Math.pow(1-share,f):1)*(share2?1-Math.pow(1-share2,f):1);}
+    // deux joueurs : chaque but de l'équipe va à l'un, à l'autre ou à personne (pas indépendants)
+    const two=share2?1-Math.pow(1-share,f)-Math.pow(1-share2,f)+Math.pow(Math.max(0,1-share-share2),f):0;
+    P+=md.A[i]*md.B[j]*(share2?two:share?1-Math.pow(1-share,f):1);}
   return P;}
 // joueurs : stats saison (g, a, md) + forme sur les derniers matchs (l5g, l5a, l5n) quand on l'a ; blessés exclus
 function teamPlayers(team){const all=players[team]||[],mx=Math.max(0,...all.map(p=>p.md||0));
   // seulement les joueurs qui jouent souvent (au moins 60 % des matchs de l'équipe)
   return all.filter(p=>!p.out&&p.md>=Math.max(3,.6*mx)).map(p=>{
   const rec=p.l5n>0,rg=rec?.5*p.g/p.md+.5*p.l5g/p.l5n:p.g/p.md,ra=rec?.5*p.a/p.md+.5*p.l5a/p.l5n:p.a/p.md;
-  return {...p,rg,ra,sg:Math.min(.55,rg/1.7),sa:Math.min(.45,ra/1.7),sd:Math.min(.7,(rg+ra)/1.7)};}).sort((x,y)=>(y.rg+y.ra)-(x.rg+x.ra));}
+  return {...p,rg,ra,sg:Math.min(.5,rg/2.1),sa:Math.min(.4,ra/2.1),sd:Math.min(.65,(rg+ra)/2.1)};}).sort((x,y)=>(y.rg+y.ra)-(x.rg+x.ra));}
 const atLeast=L=>`Au moins ${Math.floor(L)+1} buts dans le match`, atMost=L=>`${Math.floor(L)} buts ou moins dans le match`;
 const gaTxt=(g,a)=>`${g} but${g>1?'s':''}${a?`, ${a} passe${a>1?'s':''}`:''}`;
 const pline=p=>p.l5n>0?`${p.name} : ${gaTxt(p.l5g,p.l5a)} sur ses ${p.l5n} derniers matchs (saison : ${gaTxt(p.g,p.a)} en ${p.md})`:`${p.name} : ${gaTxt(p.g,p.a)} en ${p.md} matchs cette saison`;
