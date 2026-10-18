@@ -263,7 +263,7 @@ function joint(md,side,{win=false,minTotal=0,margin=0,share=0,share2=0}){
     P+=md.A[i]*md.B[j]*(share?1-Math.pow(1-share,f):1)*(share2?1-Math.pow(1-share2,f):1);}
   return P;}
 // joueurs : stats saison (g, a, md) + forme sur les derniers matchs (l5g, l5a, l5n) quand on l'a ; blessés exclus
-function teamPlayers(team){return (players[team]||[]).filter(p=>!p.out&&p.md>0).map(p=>{
+function teamPlayers(team){return (players[team]||[]).filter(p=>!p.out&&p.md>=3).map(p=>{
   const rec=p.l5n>0,rg=rec?.5*p.g/p.md+.5*p.l5g/p.l5n:p.g/p.md,ra=rec?.5*p.a/p.md+.5*p.l5a/p.l5n:p.a/p.md;
   return {...p,rg,ra,sg:Math.min(.55,rg/1.7),sa:Math.min(.45,ra/1.7),sd:Math.min(.7,(rg+ra)/1.7)};}).sort((x,y)=>(y.rg+y.ra)-(x.rg+x.ra));}
 const atLeast=L=>`Au moins ${Math.floor(L)+1} buts dans le match`, atMost=L=>`${Math.floor(L)} buts ou moins dans le match`;
@@ -306,7 +306,7 @@ function selectionsOf(m){
     B('wp-'+k,[fav+' gagne',pl.pick],{win:true,share:pl.sh},form(pl));
     if(pl.pickG)B('wd-'+k,[fav+' gagne',pl.name+' décisif (but ou passe)'],{win:true,share:pl.sd},pline(pl));
     B('wp3-'+k,[fav+' gagne',pl.pick,atLeast(2.5)],{win:true,minTotal:3,share:pl.sh},form(pl));
-    const o=star[k+1];if(o)B('wpp-'+k,[fav+' gagne',pl.pick,o.pick],{win:true,share:pl.sh,share2:o.sh},form(pl)+' · '+o.name.split(' ').slice(-1)[0]+' : '+(o.g+o.a)+' buts+passes');
+    const o=star[k+1];if(o)B('wpp-'+k,[fav+' gagne',pl.pick,o.pick],{win:true,share:pl.sh,share2:o.sh},form(pl)+' · '+pline(o));
   });
   return out;
 }
@@ -503,13 +503,16 @@ async function loadPlayers(){
   await pool(jobs,6,async([lg,d])=>{const j=await getJSON(`https://site.api.espn.com/apis/site/v2/sports/soccer/${lg}/scoreboard?dates=${d}`);
     for(const ev of j.events||[]){const c=ev.competitions&&ev.competitions[0];if(!c)continue;const H=c.competitors.find(x=>x.homeAway==='home'),A=c.competitors.find(x=>x.homeAway==='away');if(!H||!A)continue;
       const m=findMatch(H.team.displayName,A.team.displayName);if(!m)continue;const sw=sameTeam(m.home,H.team.displayName)?0:1;
-      ids[sw?m.away:m.home]={id:H.team.id,lg};ids[sw?m.home:m.away]={id:A.team.id,lg};}});
+      // le championnat national passe avant la C1 (plus de matchs, donc des stats plus fiables)
+      const set=(t,id)=>{if(!ids[t]||(ids[t].lg==='uefa.champions'&&lg!=='uefa.champions'))ids[t]={id,lg};};
+      set(sw?m.away:m.home,H.team.id);set(sw?m.home:m.away,A.team.id);}});
   const data={},pids={};
   await pool(Object.entries(ids),6,async([team,{id,lg}])=>{const r=await getJSON(`https://site.api.espn.com/apis/site/v2/sports/soccer/${lg}/teams/${id}/roster`);
     const list=[];for(const a of r.athletes||[]){const o={};for(const c of a.statistics?.splits?.categories||[])for(const x of c.stats)o[x.name]=x.value;
       const g=o.totalGoals||0,ap=o.goalAssists||0,md=o.appearances||0;if(!(g+ap>0&&md>0))continue;
       list.push({name:a.displayName,g,a:ap,md,out:!!((a.injuries||[]).length||(a.status&&a.status.type&&a.status.type!=='active')),_id:a.id,_lg:lg});}
-    list.sort((x,y)=>(y.g+y.a)/y.md-(x.g+x.a)/x.md||(y.g+y.a)-(x.g+x.a));data[team]=list.slice(0,6);});
+    // classement : buts + passes, lissé pour qu'un joueur à 1 match ne passe pas devant un titulaire
+    list.sort((x,y)=>(y.g+y.a)/(y.md+3)-(x.g+x.a)/(x.md+3));data[team]=list.slice(0,6);});
   // forme récente : 3 meilleurs joueurs des équipes qui jouent dans les 2 jours
   const soon=new Set(matches.filter(m=>m.sport==='foot'&&new Date(m.kickoff)-now()<48*3600e3).flatMap(m=>[m.home,m.away]));
   const gl=[];for(const [t,l] of Object.entries(data))if(soon.has(t))l.filter(p=>!p.out).slice(0,3).forEach(p=>gl.push(p));
