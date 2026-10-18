@@ -454,7 +454,7 @@ async function liveScores(){
       const H=c.competitors.find(x=>x.homeAway==='home'),A=c.competitors.find(x=>x.homeAway==='away');if(!H||!A)continue;
       const m=findMatch(H.team.displayName,A.team.displayName)||findMatch(H.team.shortDisplayName,A.team.shortDisplayName);if(!m)continue;
       const st=ev.status&&ev.status.type||{};got++;
-      if(st.state==='in'){m.status='live';m.score=`${H.score}-${A.score}`;m.minute=st.shortDetail==='HT'||/half/i.test(st.description||'')?'MT':(ev.status.displayClock||'LIVE');}
+      if(st.state==='in'){m.status='live';m.score=`${H.score}-${A.score}`;m.minute=st.name==='STATUS_HALFTIME'||st.shortDetail==='HT'||/^half ?time$/i.test(st.description||'')?'MT':(ev.status.displayClock||'LIVE');}
       else if(st.state==='post'){m.status='finished';m.score=`${H.score}-${A.score}`;m.minute='';}
     }}catch(e){}}));
   liveOk.scores=got>0;}
