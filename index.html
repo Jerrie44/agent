@@ -165,15 +165,13 @@ input.f{font:600 1rem var(--f-body);padding:8px 10px;border:1px solid var(--line
       </div>
       <div class="hero-body" id="combo"></div>
     </div>
-    <div class="comp">
-      <div class="comp-h"><span>Ce soir</span><button class="more" data-go="matchs">Tout voir</button></div>
-      <div id="tonight" class="comp"></div>
-    </div>
+    <div class="chips" id="chips"></div>
+    <div id="all" class="screen"></div>
   </section>
 
   <section class="screen" id="s-matchs" hidden>
-    <div class="chips" id="chips"></div>
-    <div id="all" class="screen"></div>
+    <div class="comp-h" style="padding:4px 2px"><span>En direct</span><span id="liveN"></span></div>
+    <div id="live" class="screen"></div>
   </section>
 
   <section class="screen" id="s-ticket" hidden>
@@ -207,7 +205,7 @@ input.f{font:600 1rem var(--f-body);padding:8px 10px;border:1px solid var(--line
 
 <nav class="tabbar" role="tablist" aria-label="Navigation">
   <button data-go="home" aria-selected="true"><svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Accueil</button>
-  <button data-go="matchs" aria-selected="false"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7l4 3-1.5 4.5h-5L8 10z"/></svg>Matchs</button>
+  <button data-go="matchs" aria-selected="false"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7l4 3-1.5 4.5h-5L8 10z"/></svg>Live</button>
   <button data-go="ticket" aria-selected="false"><svg viewBox="0 0 24 24"><path d="M4 6h16v4a2 2 0 0 0 0 4v4H4v-4a2 2 0 0 0 0-4z"/><path d="M14 6v12" stroke-dasharray="2 2"/></svg>Ticket<span class="badge" id="badge" hidden>0</span></button>
   <button data-go="moi" aria-selected="false"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>Moi</button>
 </nav>
@@ -259,47 +257,57 @@ function model(m){
   return pcache[key]={lh:best.lh,la:best.la,A:pmf(best.lh),B:pmf(best.la)};
 }
 // probabilité jointe sur la grille : fav = 'h' ou 'a'; win, minTotal, margin, share (part du joueur dans les buts de son équipe)
-function joint(md,side,{win=false,minTotal=0,margin=0,share=0}){
+function joint(md,side,{win=false,minTotal=0,margin=0,share=0,share2=0}){
   let P=0;for(let i=0;i<=N;i++)for(let j=0;j<=N;j++){const f=side==='h'?i:j,o=side==='h'?j:i;
     if(win&&f<=o)continue;if(i+j<minTotal)continue;if(margin&&f-o<margin)continue;
-    P+=md.A[i]*md.B[j]*(share?1-Math.pow(1-share,f):1);}
+    P+=md.A[i]*md.B[j]*(share?1-Math.pow(1-share,f):1)*(share2?1-Math.pow(1-share2,f):1);}
   return P;}
-function teamPlayers(team){return (players[team]||[]).map(p=>({...p,sg:Math.min(.55,(p.g/p.md)/1.7),sd:Math.min(.7,((p.g+p.a)/p.md)/1.7)}));}
-const pline=p=>`${p.name.split(' ').slice(-1)[0]} : ${p.g} but${p.g>1?'s':''}${p.a?`, ${p.a} passe${p.a>1?'s':''}`:''} en ${p.md} matchs`;
+// joueurs : stats saison (g, a, md) + forme sur les derniers matchs (l5g, l5a, l5n) quand on l'a ; blessés exclus
+function teamPlayers(team){return (players[team]||[]).filter(p=>!p.out&&p.md>0).map(p=>{
+  const rec=p.l5n>0,rg=rec?.5*p.g/p.md+.5*p.l5g/p.l5n:p.g/p.md,ra=rec?.5*p.a/p.md+.5*p.l5a/p.l5n:p.a/p.md;
+  return {...p,rg,ra,sg:Math.min(.55,rg/1.7),sa:Math.min(.45,ra/1.7),sd:Math.min(.7,(rg+ra)/1.7)};}).sort((x,y)=>(y.rg+y.ra)-(x.rg+x.ra));}
+const atLeast=L=>`Au moins ${Math.floor(L)+1} buts dans le match`, atMost=L=>`${Math.floor(L)} buts ou moins dans le match`;
+const gaTxt=(g,a)=>`${g} but${g>1?'s':''}${a?`, ${a} passe${a>1?'s':''}`:''}`;
+const pline=p=>p.l5n>0?`${p.name} : ${gaTxt(p.l5g,p.l5a)} sur ses ${p.l5n} derniers matchs (saison : ${gaTxt(p.g,p.a)} en ${p.md})`:`${p.name} : ${gaTxt(p.g,p.a)} en ${p.md} matchs cette saison`;
 
 /* ---------- sélections ---------- */
 function selectionsOf(m){
   const out=[];const add=(market,key,label,prob,o={})=>{if(!(prob>0.005&&prob<0.995))return;const fair=1/prob;out.push({id:m.id+':'+key,mid:m.id,match:m.home+' – '+m.away,market,label,prob,fair,book:o.book||null,est:Math.max(1.01,fair*(o.margin||M_SIMPLE)),why:o.why||'',picks:o.picks||[label],fav:!!o.fav,builder:!!o.builder,player:!!o.player});};
   const p=norm(m.pm);
   if(m.sport==='tennis'){add('Vainqueur','h',m.home,p.h);add('Vainqueur','a',m.away,p.a);
-    if(m.total){const t=norm({o:m.total.over,u:m.total.under}),L=String(m.total.line).replace('.',',');add('Jeux','o','+ de '+L+' jeux',t.o);add('Jeux','u','– de '+L+' jeux',t.u);}
+    if(m.total){const t=norm({o:m.total.over,u:m.total.under}),L=String(m.total.line).replace('.',',');add('Jeux','o','Au moins '+(Math.floor(m.total.line)+1)+' jeux',t.o);add('Jeux','u',Math.floor(m.total.line)+' jeux ou moins',t.u);}
     return out;}
   const b=m.book||{},side=p.h>=p.a?'h':'a',fav=side==='h'?m.home:m.away;
   add('Résultat','h',m.home,p.h,{book:b.h,fav:side==='h',why:`${m.home} gagne ${odds1in(p.h)}`});add('Résultat','d','Nul',p.d,{book:b.d});add('Résultat','a',m.away,p.a,{book:b.a,fav:side==='a',why:`${m.away} gagne ${odds1in(p.a)}`});
   add('Double chance','hd',m.home+' ou nul',p.h+p.d,{fav:side==='h',why:`${m.home} ne perd pas ${odds1in(p.h+p.d)}`});add('Double chance','da',m.away+' ou nul',p.a+p.d,{fav:side==='a',why:`${m.away} ne perd pas ${odds1in(p.a+p.d)}`});
-  if(m.total){const t=norm({o:m.total.over,u:m.total.under}),L=String(m.total.line).replace('.',',');const md0=model(m),xg=md0?` · ${(md0.lh+md0.la).toFixed(1).replace('.',',')} buts attendus`:'';add('Buts','o','+ de '+L+' buts',t.o,{book:m.total.line===2.5?b.over25:null,fav:true,why:'Marché Polymarket'+xg});add('Buts','u','– de '+L+' buts',t.u);}
+  if(m.total){const t=norm({o:m.total.over,u:m.total.under}),L=String(m.total.line).replace('.',',');const md0=model(m),xg=md0?` · ${(md0.lh+md0.la).toFixed(1).replace('.',',')} buts attendus`:'';add('Buts','o',atLeast(m.total.line),t.o,{book:m.total.line===2.5?b.over25:null,fav:true,why:'Marché Polymarket'+xg});add('Buts','u',atMost(m.total.line),t.u);}
   const md=model(m);if(!md)return out;
-  if(m.total.line!==1.5)add('Buts','o15','+ de 1,5 buts',joint(md,'h',{minTotal:2}),{fav:true,why:`${(md.lh+md.la).toFixed(1).replace('.',',')} buts attendus`});
+  if(m.total.line!==1.5)add('Buts','o15',atLeast(1.5),joint(md,'h',{minTotal:2}),{fav:true,why:`${(md.lh+md.la).toFixed(1).replace('.',',')} buts attendus`});
   // les deux marquent
   let btts=0;for(let i=1;i<=N;i++)for(let j=1;j<=N;j++)btts+=md.A[i]*md.B[j];add('Les deux marquent','btts','Les deux équipes marquent',btts,{book:b.btts});
   // buteurs et décisifs (les deux équipes)
   for(const s of ['h','a']){const team=s==='h'?m.home:m.away;
     for(const pl of teamPlayers(team)){
       if(pl.g>0)add('Buteurs',`g-${s}-${pl.name}`,pl.name+' buteur',joint(md,s,{share:pl.sg}),{margin:M_PLAYER,player:true,fav:s===side,why:pline(pl)});
-      if(pl.g+pl.a>0)add('Joueur décisif',`d-${s}-${pl.name}`,pl.name+' décisif',joint(md,s,{share:pl.sd}),{margin:M_PLAYER,player:true,fav:s===side,why:pline(pl)+' (but ou passe)'});
+      if(pl.a>0||pl.l5a>0)add('Passeur',`a-${s}-${pl.name}`,pl.name+' passeur décisif',joint(md,s,{share:pl.sa}),{margin:M_PLAYER,player:true,why:pline(pl)});
+      if(pl.g+pl.a>0)add('Joueur décisif',`d-${s}-${pl.name}`,pl.name+' décisif (but ou passe)',joint(md,s,{share:pl.sd}),{margin:M_PLAYER,player:true,fav:s===side,why:pline(pl)});
     }}
   (m.scorers||[]).forEach((s,i)=>add('Buteurs','sc'+i,s.name+' buteur',Math.min(.9,1/s.odd/1.08),{book:s.odd,player:true}));
   // MyMatch : le favori gagne + buts (+ joueur décisif), comme sur Winamax
   const B=(key,picks,opt,why)=>add('MyMatch','mm-'+key,picks.join(' + '),joint(md,side,opt),{margin:M_BUILDER,builder:true,fav:true,picks,why});
-  B('w15',[fav+' gagne','Plus de 1,5 buts'],{win:true,minTotal:2},`${fav} gagne ${odds1in(p[side])}`);
-  B('w25',[fav+' gagne','Plus de 2,5 buts'],{win:true,minTotal:3},`${fav} attend ${(side==='h'?md.lh:md.la).toFixed(1).replace('.',',')} buts dans ce match`);
-  B('w2',[fav+' gagne par 2 buts ou +'],{win:true,margin:2},`${fav} attend ${(side==='h'?md.lh:md.la).toFixed(1).replace('.',',')} buts, l'adversaire ${(side==='h'?md.la:md.lh).toFixed(1).replace('.',',')}`);
-  for(const pl of teamPlayers(fav).slice(0,2)){
-    if(pl.g+pl.a>0){B('wd-'+pl.name,[fav+' gagne',pl.name+' décisif'],{win:true,share:pl.sd},pline(pl));
-      B('w15d-'+pl.name,[fav+' gagne','Plus de 1,5 buts',pl.name+' décisif'],{win:true,minTotal:2,share:pl.sd},pline(pl));}
-    if(pl.g>0){B('wg-'+pl.name,[fav+' gagne',pl.name+' buteur'],{win:true,share:pl.sg},pline(pl));
-      B('w25g-'+pl.name,[fav+' gagne','Plus de 2,5 buts',pl.name+' buteur'],{win:true,minTotal:3,share:pl.sg},pline(pl));}
-  }
+  // forme : buteur si le joueur marque au moins 1 match sur 2, sinon décisif (but ou passe), plus probable
+  // forme : buteur si le joueur enchaîne les buts, passeur s'il enchaîne les passes, sinon décisif (but ou passe), le plus probable
+  const star=teamPlayers(fav).filter(pl=>pl.g+pl.a>0).slice(0,3).map(pl=>{
+    const kind=pl.rg>=.45&&pl.rg>=1.5*pl.ra?'g':pl.ra>=.4&&pl.ra>=1.5*pl.rg?'a':'d';
+    return {...pl,kind,pickG:kind==='g',pick:pl.name+(kind==='g'?' buteur':kind==='a'?' passeur décisif':' décisif (but ou passe)'),sh:kind==='g'?pl.sg:kind==='a'?pl.sa:pl.sd};});
+  const form=pl=>pline(pl)+(pl.kind==='g'?' · en forme devant le but':pl.kind==='a'?' · en forme à la passe':'');
+  B('w3',[fav+' gagne',atLeast(2.5)],{win:true,minTotal:3},`${fav} gagne ${odds1in(p[side])}`);
+  star.forEach((pl,k)=>{
+    B('wp-'+k,[fav+' gagne',pl.pick],{win:true,share:pl.sh},form(pl));
+    if(pl.pickG)B('wd-'+k,[fav+' gagne',pl.name+' décisif (but ou passe)'],{win:true,share:pl.sd},pline(pl));
+    B('wp3-'+k,[fav+' gagne',pl.pick,atLeast(2.5)],{win:true,minTotal:3,share:pl.sh},form(pl));
+    const o=star[k+1];if(o)B('wpp-'+k,[fav+' gagne',pl.pick,o.pick],{win:true,share:pl.sh,share2:o.sh},form(pl)+' · '+o.name.split(' ').slice(-1)[0]+' : '+(o.g+o.a)+' buts+passes');
+  });
   return out;
 }
 const oddOf=s=>s.book||s.est;
@@ -315,8 +323,11 @@ const favProb=m=>{const p=norm(m.pm);return Math.max(p.h,p.a);};
 // Chaque niveau vise une cote ; on prend les favoris les plus nets et, pour chacun, le pari (simple ou MyMatch) dont la cote colle à l'objectif.
 const LEVELS=[{name:'Safe',target:2.5,legs:2,minFav:.6},{name:'Équilibré',target:8,legs:3,minFav:.52},{name:'Poker',target:25,legs:3,minFav:.5}];
 function pickFor(m,t){
-  const c=selectionsOf(m).filter(s=>s.fav&&s.market!=='Les deux marquent'&&!(s.market==='Buts'&&s.id.endsWith(':u')));
-  let best=null;for(const s of c){const cost=Math.abs(Math.log(oddOf(s)/t))-0.3*Math.log(s.prob*oddOf(s));if(!best||cost<best.cost)best={s,cost};}
+  // combinés façon tickets gagnants : le favori gagne + son joueur en forme (MyMatch), sinon le simple « gagne »
+  const all=selectionsOf(m).filter(s=>s.fav),withP=all.filter(s=>s.builder&&s.picks.some(x=>/buteur|décisif/.test(x)));
+  const c=withP.length?withP:all.filter(s=>s.market==='Résultat');
+  // on préfère les joueurs aux paris sur le nombre de buts
+  let best=null;for(const s of c){const cost=Math.abs(Math.log(oddOf(s)/t))-0.3*Math.log(s.prob*oddOf(s))+(s.picks.some(x=>/^Au moins/.test(x))?.2:0);if(!best||cost<best.cost)best={s,cost};}
   return best&&best.s;}
 function buildCombo(lv){
   const L=LEVELS[lv];
@@ -355,7 +366,7 @@ function matchCard(m){
   const mid=m.status==='finished'&&m.score?`<span class="score">${esc(m.score)}</span><span class="d">Terminé</span>`:live?`${(m.score||m.sport==='foot')?`<span class="score">${esc(m.score||'0-0')}</span>`:'<span class="t">–</span>'}<span class="livetag">${m.minute?esc(m.minute):'LIVE'}</span>`:`<span class="t">${hm(m.kickoff)}</span><span class="d">${esc(dayLabel(m.kickoff)==="Aujourd'hui"?'Aujourd\'hui':dayLabel(m.kickoff).split(' ').slice(0,2).join(' '))}</span>`;
   let body='';const extra=sels.filter(s=>!['h','d','a'].some(k=>s.id===m.id+':'+k));
   if(open.has(m.id)){const g={};extra.forEach(s=>(g[s.market]=g[s.market]||[]).push(s));
-    const order=['MyMatch','Buteurs','Joueur décisif','Buts','Double chance','Les deux marquent','Jeux'];
+    const order=['MyMatch','Joueur décisif','Buteurs','Passeur','Buts','Double chance','Les deux marquent','Jeux'];
     body=`<div class="mkts">${order.filter(k=>g[k]).map(k=>`<div class="mkt"><span class="lbl">${esc(k)}</span><div class="${k==='MyMatch'?'':'grid2'}" style="display:grid;gap:6px;${k==='MyMatch'?'':'grid-template-columns:1fr 1fr'}">${g[k].sort((a,b)=>b.prob-a.prob).slice(0,k==='MyMatch'?6:8).map(s=>`<div>${oddBtn(s,s.label)}${s.player?`<div class="pstat" style="text-align:center">${esc(s.why)}</div>`:''}</div>`).join('')}</div></div>`).join('')}${m.notes?`<p class="hint" style="text-align:center">${esc(m.notes)}</p>`:''}</div>`;}
   return `<div class="mcard"><button class="mtop" data-open="${esc(m.id)}" aria-expanded="${open.has(m.id)}"><span class="team th">${esc(m.home)}</span><span class="mid">${mid}</span><span class="team ta">${esc(m.away)}</span></button>
    <div class="odds3" style="--n:${main.length}">${main.map(([k,l])=>get(k)?oddBtn(get(k),l):'').join('')}</div>
@@ -363,12 +374,13 @@ function matchCard(m){
 }
 function byComp(list){const g=[];list.forEach(m=>{let x=g.find(y=>y.c===m.league);if(!x)g.push(x={c:m.league,ms:[]});x.ms.push(m);});return g;}
 function renderHome(){renderCombo();
-  const list=matches.filter(m=>(isLive(m)||isUp(m))&&dayLabel(m.kickoff)==="Aujourd'hui"&&m.sport==='foot').sort((a,b)=>(isLive(b)-isLive(a))||new Date(a.kickoff)-new Date(b.kickoff)).slice(0,5);
-  $('#tonight').innerHTML=list.length?list.map(matchCard).join(''):'<p class="empty">Plus de match aujourd\'hui. Regarde l\'onglet Matchs.</p>';}
-function renderMatchs(){
-  $('#chips').innerHTML=[['all','Tout'],['live','En direct'],['today',"Aujourd'hui"],['Ligue des champions','C1'],['Ligue 1','Ligue 1'],['Premier League','Premier League'],['Liga','Liga'],['Serie A','Serie A'],['tennis','Tennis']].map(([k,l])=>`<button class="chip" data-filter="${esc(k)}" aria-pressed="${filter===k}">${esc(l)}</button>`).join('');
-  const list=matches.filter(m=>isLive(m)||isUp(m)).filter(m=>filter==='all'||(filter==='live'?isLive(m):filter==='today'?dayLabel(m.kickoff)==="Aujourd'hui":filter==='tennis'?m.sport==='tennis':m.league===filter)).sort((a,b)=>(isLive(b)-isLive(a))||new Date(a.kickoff)-new Date(b.kickoff));
+  $('#chips').innerHTML=[['all','Tout'],['today',"Aujourd'hui"],['Ligue des champions','C1'],['Ligue 1','Ligue 1'],['Premier League','Premier League'],['Liga','Liga'],['Serie A','Serie A'],['tennis','Tennis']].map(([k,l])=>`<button class="chip" data-filter="${esc(k)}" aria-pressed="${filter===k}">${esc(l)}</button>`).join('');
+  const list=matches.filter(m=>isUp(m)||isLive(m)).filter(m=>filter==='all'||(filter==='today'?dayLabel(m.kickoff)==="Aujourd'hui":filter==='tennis'?m.sport==='tennis':m.league===filter)).sort((a,b)=>(isLive(b)-isLive(a))||new Date(a.kickoff)-new Date(b.kickoff));
   $('#all').innerHTML=list.length?byComp(list).map(g=>`<div class="comp"><div class="comp-h"><span>${esc(g.c)}</span><span>${g.ms.length}</span></div>${g.ms.map(matchCard).join('')}</div>`).join(''):'<p class="empty">Aucun match pour ce filtre.</p>';}
+function renderMatchs(){
+  const list=matches.filter(isLive).sort((a,b)=>(a.sport==='tennis')-(b.sport==='tennis')||new Date(a.kickoff)-new Date(b.kickoff));
+  $('#liveN').textContent=list.length?list.length+' match'+(list.length>1?'s':''):'';
+  $('#live').innerHTML=list.length?byComp(list).map(g=>`<div class="comp"><div class="comp-h"><span>${esc(g.c)}</span><span>${g.ms.length}</span></div>${g.ms.map(matchCard).join('')}</div>`).join(''):'<p class="empty">Aucun match en cours pour l\'instant.</p>';}
 
 /* ---------- ticket ---------- */
 function findSel(id){const m=matches.find(x=>x.id===id.split(':')[0]);return m?selectionsOf(m).find(s=>s.id===id):null;}
@@ -417,7 +429,7 @@ document.addEventListener('click',e=>{const t=e.target.closest('[data-go],[data-
   if(t.dataset.go)go(t.dataset.go);
   else if(t.dataset.open){open.has(t.dataset.open)?open.delete(t.dataset.open):open.add(t.dataset.open);renderHome();renderMatchs();}
   else if(t.dataset.sel){const s=findSel(t.dataset.sel);if(!s)return;const i=ticket.findIndex(x=>x.id===s.id);if(i>=0){ticket.splice(i,1);saveTicket();toast('Retiré du ticket');}else addLeg(s);renderAll();}
-  else if(t.dataset.filter){filter=t.dataset.filter;renderMatchs();}
+  else if(t.dataset.filter){filter=t.dataset.filter;renderHome();}
   else if(t.dataset.level!=null){level=+t.dataset.level;renderCombo();}});
 try{const v=localStorage.getItem('bb-view');if(v&&$('#s-'+v))go(v);}catch(e){}
 
@@ -442,7 +454,7 @@ let liveOk={scores:false,odds:false};
 async function loadFeed(){
   try{const f=await getJSON('feed.json?t='+Date.now());
     const keep=new Map(matches.map(m=>[m.id,{score:m.score,minute:m.minute,status:m.status,pm:m._live&&m.pm,_live:m._live}]));
-    feed=Object.assign(f,{liveAt:feed&&feed.liveAt});players=f.players||{};
+    feed=Object.assign(f,{liveAt:feed&&feed.liveAt});players=f.players||{};applyPlayers();
     matches=(f.matches||[]).filter(m=>m&&m.pm&&m.kickoff).map(m=>{const k=keep.get(m.id);if(k&&k._live){m.pm=k.pm||m.pm;m._live=true;}if(k&&k.score&&!m.score){m.score=k.score;m.minute=k.minute;m.status=k.status;}return m;});
     renderAll();}catch(e){if(!feed)$('#fresh').textContent='Pas de connexion';}}
 
@@ -477,6 +489,38 @@ async function liveOdds(){
   }catch(e){}
   liveOk.odds=got>0;}
 
+
+/* joueurs : effectif + stats saison ESPN pour chaque équipe du relevé, forme des 5 derniers matchs des meilleurs joueurs.
+   Mis en cache 3 h sur le téléphone ; le relevé (renderfoot) reste la base si ESPN ne répond pas. */
+const pool=async(items,n,fn)=>{let i=0;await Promise.all(Array.from({length:n},async()=>{while(i<items.length){const k=i++;try{await fn(items[k]);}catch(e){}}}));};
+let livePlayers=null;
+function applyPlayers(){if(!livePlayers)return;players=Object.assign({},(feed&&feed.players)||{});for(const [t,l] of Object.entries(livePlayers))if(l.length)players[t]=l;}
+async function loadPlayers(){
+  try{const c=JSON.parse(localStorage.getItem('bb-pl')||'null');if(c&&Date.now()-c.at<3*3600e3){livePlayers=c.data;applyPlayers();renderAll();return;}}catch(e){}
+  const ids={};// équipe du relevé -> {id, lg}
+  const days=[0,1,2,3].map(d=>new Date(Date.now()+d*864e5).toISOString().slice(0,10).replace(/-/g,''));
+  const jobs=[];for(const lg of Object.values(ESPN))for(const d of days)jobs.push([lg,d]);
+  await pool(jobs,6,async([lg,d])=>{const j=await getJSON(`https://site.api.espn.com/apis/site/v2/sports/soccer/${lg}/scoreboard?dates=${d}`);
+    for(const ev of j.events||[]){const c=ev.competitions&&ev.competitions[0];if(!c)continue;const H=c.competitors.find(x=>x.homeAway==='home'),A=c.competitors.find(x=>x.homeAway==='away');if(!H||!A)continue;
+      const m=findMatch(H.team.displayName,A.team.displayName);if(!m)continue;const sw=sameTeam(m.home,H.team.displayName)?0:1;
+      ids[sw?m.away:m.home]={id:H.team.id,lg};ids[sw?m.home:m.away]={id:A.team.id,lg};}});
+  const data={},pids={};
+  await pool(Object.entries(ids),6,async([team,{id,lg}])=>{const r=await getJSON(`https://site.api.espn.com/apis/site/v2/sports/soccer/${lg}/teams/${id}/roster`);
+    const list=[];for(const a of r.athletes||[]){const o={};for(const c of a.statistics?.splits?.categories||[])for(const x of c.stats)o[x.name]=x.value;
+      const g=o.totalGoals||0,ap=o.goalAssists||0,md=o.appearances||0;if(!(g+ap>0&&md>0))continue;
+      list.push({name:a.displayName,g,a:ap,md,out:!!((a.injuries||[]).length||(a.status&&a.status.type&&a.status.type!=='active')),_id:a.id,_lg:lg});}
+    list.sort((x,y)=>(y.g+y.a)/y.md-(x.g+x.a)/x.md||(y.g+y.a)-(x.g+x.a));data[team]=list.slice(0,6);});
+  // forme récente : 3 meilleurs joueurs des équipes qui jouent dans les 2 jours
+  const soon=new Set(matches.filter(m=>m.sport==='foot'&&new Date(m.kickoff)-now()<48*3600e3).flatMap(m=>[m.home,m.away]));
+  const gl=[];for(const [t,l] of Object.entries(data))if(soon.has(t))l.filter(p=>!p.out).slice(0,3).forEach(p=>gl.push(p));
+  await pool(gl,6,async p=>{const j=await getJSON(`https://site.web.api.espn.com/apis/common/v3/sports/soccer/${p._lg}/athletes/${p._id}/gamelog`);
+    const iG=(j.names||[]).indexOf('totalGoals'),iA=(j.names||[]).indexOf('goalAssists');if(iG<0)return;
+    const evs=((j.seasonTypes||[])[0]?.categories||[]).flatMap(c=>c.events||[]).slice(0,5);if(!evs.length)return;
+    p.l5n=evs.length;p.l5g=evs.reduce((s,e)=>s+(+e.stats[iG]||0),0);p.l5a=evs.reduce((s,e)=>s+(+e.stats[iA]||0),0);});
+  for(const l of Object.values(data))l.forEach(p=>{delete p._id;delete p._lg;});
+  if(Object.keys(data).length){livePlayers=data;try{localStorage.setItem('bb-pl',JSON.stringify({at:Date.now(),data}));}catch(e){}applyPlayers();renderAll();}
+}
+
 async function tick(){
   if(document.hidden)return;
   await Promise.all([liveScores(),liveOdds()]);
@@ -484,7 +528,7 @@ async function tick(){
   renderAll();
   $('#storeInfo').textContent='Sauvegardé sur ce téléphone. Direct : scores '+(liveOk.scores?'OK':'indisponibles')+', cotes '+(liveOk.odds?'OK':'indisponibles')+'.';}
 
-(async()=>{await loadFeed();await tick();
+(async()=>{await loadFeed();await tick();loadPlayers();setInterval(loadPlayers,3600e3);
   setInterval(tick,60e3);setInterval(loadFeed,15*60e3);
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)tick();});})();
 })();
