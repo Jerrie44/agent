@@ -116,6 +116,11 @@ input[type=range]{width:100%;accent-color:var(--red);height:28px}
 .tleg .s{font-weight:600}
 .tleg .v{grid-column:1/-1;font-size:.76rem;color:var(--muted)}
 .tleg .v.val{color:var(--gold)}
+.need{display:grid;grid-template-columns:minmax(0,1fr) 84px;gap:10px;align-items:center;font-size:.86rem;margin-top:4px}
+.need b{font-family:var(--f-display);font-size:1.15rem}
+.verdict{font-weight:700;font-size:.9rem;text-align:center;padding:6px 0 2px}
+.verdict.ok{color:var(--gold)} .verdict.no{color:var(--red-2)}
+.leg .when{font-size:.78rem;color:var(--muted)}
 .x{all:unset;cursor:pointer;color:var(--muted);text-align:center;font-size:1.3rem}
 input.f{font:600 1rem var(--f-body);padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);color:var(--ink);width:100%;min-width:0;text-align:center}
 .stats{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -156,16 +161,12 @@ input.f{font:600 1rem var(--f-body);padding:8px 10px;border:1px solid var(--line
   <section class="screen" id="s-home">
     <div class="hero">
       <div class="hero-top">
-        <h1>Combiné du jour</h1>
-        <div class="seg" role="tablist" id="seg">
-          <button data-level="0" aria-selected="true">Safe</button>
-          <button data-level="1" aria-selected="false">Équilibré</button>
-          <button data-level="2" aria-selected="false">Poker</button>
-        </div>
+        <h1>Paris du jour</h1>
       </div>
       <div class="hero-body" id="combo"></div>
     </div>
     <div class="chips" id="chips"></div>
+    <p class="hint" style="text-align:center">Les cotes affichées sont les cotes justes (sans marge du bookmaker). Touche une cote pour la vérifier.</p>
     <div id="all" class="screen"></div>
   </section>
 
@@ -181,11 +182,8 @@ input.f{font:600 1rem var(--f-body);padding:8px 10px;border:1px solid var(--line
   <section class="screen" id="s-moi" hidden>
     <div class="card"><div class="stats" id="stats"></div></div>
     <div class="card">
-      <div class="field"><label for="defStake">Mise habituelle (entre 5 et 10 €)</label>
-        <div class="stake-row"><span></span><b id="defStakeTxt">5 €</b></div>
-        <input type="range" id="defStake" min="5" max="10" step="1" value="5">
-      </div>
       <div class="field"><label for="sBank">Bankroll (€)</label><input class="f" id="sBank" inputmode="decimal"></div>
+      <div class="field"><label for="sMin">Mise minimum de ton site (€)</label><input class="f" id="sMin" inputmode="decimal"></div>
       <div class="field"><label for="sDaily">Perte max par jour (€)</label><input class="f" id="sDaily" inputmode="decimal"></div>
       <button class="cta" id="save">Enregistrer</button>
       <p class="hint" id="storeInfo"></p>
@@ -194,9 +192,11 @@ input.f{font:600 1rem var(--f-body);padding:8px 10px;border:1px solid var(--line
     <div class="card">
       <h2>À savoir</h2>
       <ul class="rules">
-        <li>Probabilités des matchs : marchés Polymarket. Buteurs et décisifs : stats 2026-27 du joueur × buts attendus de son équipe dans ce match (estimation).</li>
-        <li>Cotes "≈" : estimation de la cote bookmaker. Tape la vraie cote Winamax dans le ticket pour voir s'il y a value.</li>
-        <li>Plus la cote est grosse, plus le combiné est rare : la chance de passer est toujours affichée.</li>
+        <li>Les chances de chaque pari viennent des prix Polymarket, c'est-à-dire l'avis du marché. L'agent ne devine pas mieux que le marché : il gagne seulement quand ton site paie plus que la cote juste.</li>
+        <li>Cote minimum = cote juste + 3 %. Si ton site paie moins, on ne joue pas. Certains jours, il n'y a rien à jouer : c'est normal.</li>
+        <li>Une sélection par pari, deux au maximum. Plus de buteurs, de MyMatch ni de combinés à 5 matchs : leurs cotes sont impossibles à chiffrer honnêtement et chaque sélection ajoutée multiplie la marge du bookmaker.</li>
+        <li>Mise = un quart de Kelly, jamais plus de 10 % de la bankroll. Avec 1 €, ça fait 0,10 € par pari.</li>
+        <li>Aucun système ne garantit de gagner. Même un bon pari perd souvent : on juge sur 100 paris, pas sur 3.</li>
         <li>Limite du jour atteinte = on arrête. Joueurs Info Service : 09 74 75 13 13.</li>
       </ul>
     </div>
@@ -221,17 +221,17 @@ const fx=n=>isFinite(n)?n.toFixed(2).replace('.',','):'—';
 const num=v=>{const n=parseFloat(String(v??'').replace(',','.'));return isFinite(n)?n:NaN;};
 const odds1in=p=>p>=.5?'plus d\'1 fois sur 2':`1 fois sur ${Math.max(2,Math.round(1/p))}`;
 function toast(t){const el=$('#toast');el.textContent=t;el.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>el.hidden=true,1800);}
-const M_SIMPLE=.93, M_PLAYER=.88, M_BUILDER=.85, MIN_STAKE=5, MAX_STAKE=10;
+// Règles : value obligatoire (cote du site ≥ cote juste + 3 %), mise = Kelly/4 plafonnée à 10 % de la bankroll, 2 sélections max
+const EDGE=.03, MAX_EDGE=.30, KELLY=.25, MAX_FRAC=.10, P_MIN=.55, P_MAX=.88, MAX_LEGS=2;
 
 /* ---------- état ---------- */
-let feed=null, matches=[], players={}, filter='all', level=0, open=new Set();
+let feed=null, matches=[], filter='all', open=new Set();
 let ticket=[];try{ticket=JSON.parse(localStorage.getItem('bb-ticket')||'[]')||[];}catch(e){}
-const DEFAULT={bankroll:50,dailyLimit:20,stake:5,bets:[]};
+// v2 : on repart de 1 €, les anciens paris (combinés 5-10 €) sont archivés hors statistiques
+const DEFAULT={v:2,bankroll:1,minStake:.1,dailyLimit:.3,bets:[],odds:{},archive:[]};
 let state=Object.assign({},DEFAULT),saveDoc=null;
-try{const s=JSON.parse(localStorage.getItem('bb-state')||'null');if(s)state=Object.assign({},DEFAULT,s);}catch(e){}
-const clampStake=v=>Math.min(MAX_STAKE,Math.max(MIN_STAKE,Math.round(v||5)));
-state.stake=clampStake(state.stake);
-let stake=state.stake;
+try{const s=JSON.parse(localStorage.getItem('bb-state')||'null');if(s)state=s.v===2?Object.assign({},DEFAULT,s):Object.assign({},DEFAULT,{archive:s.bets||[]});}catch(e){}
+if(ticket.some(t=>!t.min))ticket=[];
 const saveTicket=()=>{try{localStorage.setItem('bb-ticket',JSON.stringify(ticket));}catch(e){}};
 async function persist(){try{localStorage.setItem('bb-state',JSON.stringify(state));}catch(e){}
   if(saveDoc){try{await saveDoc.set(JSON.parse(JSON.stringify(state)));}catch(e){$('#storeInfo').textContent='Sauvegarde en ligne refusée, gardé sur ce téléphone.';}}}
@@ -240,81 +240,29 @@ async function persist(){try{localStorage.setItem('bb-state',JSON.stringify(stat
 const pl=b=>b.status==='won'?b.stake*(b.odds-1):b.status==='lost'?-b.stake:0;
 const dayStart=()=>{const d=new Date();d.setHours(0,0,0,0);return d;};
 function lossToday(){return Math.max(0,state.bets.filter(b=>new Date(b.date)>=dayStart()).reduce((s,b)=>s+(b.status==='lost'||b.status==='pending'?b.stake:0)-(b.status==='won'?b.stake*(b.odds-1):0),0));}
-const remaining=()=>Math.max(0,state.dailyLimit-lossToday());
+const remaining=()=>Math.max(0,Math.min(state.bankroll,state.dailyLimit-lossToday()));
+const r2=x=>Math.round(x*100)/100;
+// mise conseillée : 0 sans value ; sinon Kelly/4, plafonnée à 10 % de la bankroll et à la limite du jour, au moins la mise minimum du site
+function stakeFor(p,o){if(!(o>1)||p*o<1+EDGE||p*o>1+MAX_EDGE)return 0;
+  const cap=Math.min(MAX_FRAC*state.bankroll,remaining());let st=Math.min(cap,KELLY*(p*o-1)/(o-1)*state.bankroll);
+  if(st<state.minStake)st=cap>=state.minStake?state.minStake:0;return st>0?r2(st):0;}
 
-/* ---------- modèle de score ---------- */
-// Poisson calé sur les prix du marché (1N2 + total) -> buts attendus de chaque équipe -> grille des scores.
+/* ---------- probabilités ---------- */
+// Prix Polymarket normalisés (somme = 1). Seuls les marchés réellement cotés : 1N2, double chance (somme exacte), total de buts à la ligne cotée.
 const norm=o=>{const ks=Object.keys(o).filter(k=>o[k]>0);const S=ks.reduce((s,k)=>s+o[k],0);const r={};ks.forEach(k=>r[k]=o[k]/S);return r;};
-const N=10, pcache={};
-const pmf=l=>{const r=[Math.exp(-l)];for(let k=1;k<=N;k++)r.push(r[k-1]*l/k);return r;};
-function model(m){
-  if(!m.total||m.sport!=='foot')return null;
-  const key=m.id+JSON.stringify(m.pm)+JSON.stringify(m.total);if(key in pcache)return pcache[key];
-  const p=norm(m.pm),t=norm({o:m.total.over,u:m.total.under}),L=m.total.line;
-  const fit=(lh,la)=>{const A=pmf(lh),B=pmf(la);let h=0,d=0,o=0;for(let i=0;i<=N;i++)for(let j=0;j<=N;j++){const q=A[i]*B[j];if(i>j)h+=q;else if(i===j)d+=q;if(i+j>L)o+=q;}return (h-p.h)**2+(d-p.d)**2+(1-h-d-p.a)**2+(o-t.o)**2;};
-  let best={e:9};const search=(h0,h1,a0,a1,st)=>{for(let lh=h0;lh<=h1+1e-9;lh+=st)for(let la=a0;la<=a1+1e-9;la+=st){const e=fit(lh,la);if(e<best.e)best={e,lh,la};}};
-  search(.2,4,.2,4,.1);search(Math.max(.05,best.lh-.1),best.lh+.1,Math.max(.05,best.la-.1),best.la+.1,.02);
-  return pcache[key]={lh:best.lh,la:best.la,A:pmf(best.lh),B:pmf(best.la)};
-}
-// probabilité jointe sur la grille : fav = 'h' ou 'a'; win, minTotal, margin, share (part du joueur dans les buts de son équipe)
-function joint(md,side,{win=false,minTotal=0,margin=0,share=0,share2=0}){
-  let P=0;for(let i=0;i<=N;i++)for(let j=0;j<=N;j++){const f=side==='h'?i:j,o=side==='h'?j:i;
-    if(win&&f<=o)continue;if(i+j<minTotal)continue;if(margin&&f-o<margin)continue;
-    // deux joueurs : chaque but de l'équipe va à l'un, à l'autre ou à personne (pas indépendants)
-    const two=share2?1-Math.pow(1-share,f)-Math.pow(1-share2,f)+Math.pow(Math.max(0,1-share-share2),f):0;
-    P+=md.A[i]*md.B[j]*(share2?two:share?1-Math.pow(1-share,f):1);}
-  return P;}
-// joueurs : stats saison (g, a, md) + forme sur les derniers matchs (l5g, l5a, l5n) quand on l'a ; blessés exclus
-function teamPlayers(team){const all=players[team]||[],mx=Math.max(0,...all.map(p=>p.md||0));
-  // seulement les joueurs qui jouent souvent (au moins 60 % des matchs de l'équipe)
-  return all.filter(p=>!p.out&&p.md>=Math.max(3,.6*mx)).map(p=>{
-  const rec=p.l5n>0,rg=rec?.5*p.g/p.md+.5*p.l5g/p.l5n:p.g/p.md,ra=rec?.5*p.a/p.md+.5*p.l5a/p.l5n:p.a/p.md;
-  return {...p,rg,ra,sg:Math.min(.5,rg/2.1),sa:Math.min(.4,ra/2.1),sd:Math.min(.65,(rg+ra)/2.1)};}).sort((x,y)=>(y.rg+y.ra)-(x.rg+x.ra));}
 const atLeast=L=>`Au moins ${Math.floor(L)+1} buts dans le match`, atMost=L=>`${Math.floor(L)} buts ou moins dans le match`;
-const gaTxt=(g,a)=>`${g} but${g>1?'s':''}${a?`, ${a} passe${a>1?'s':''}`:''}`;
-const pline=p=>p.l5n>0?`${p.name} : ${gaTxt(p.l5g,p.l5a)} sur ses ${p.l5n} derniers matchs (saison : ${gaTxt(p.g,p.a)} en ${p.md})`:`${p.name} : ${gaTxt(p.g,p.a)} en ${p.md} matchs cette saison`;
-
 /* ---------- sélections ---------- */
 function selectionsOf(m){
-  const out=[];const add=(market,key,label,prob,o={})=>{if(!(prob>0.005&&prob<0.995))return;const fair=1/prob;out.push({id:m.id+':'+key,mid:m.id,match:m.home+' – '+m.away,market,label,prob,fair,book:o.book||null,est:Math.max(1.01,fair*(o.margin||M_SIMPLE)),why:o.why||'',picks:o.picks||[label],fav:!!o.fav,builder:!!o.builder,player:!!o.player});};
+  const out=[];const add=(market,key,label,prob)=>{if(!(prob>0.005&&prob<0.995))return;
+    out.push({id:m.id+':'+key,mid:m.id,match:m.home+' – '+m.away,kickoff:m.kickoff,market,label,prob,fair:1/prob,min:(1+EDGE)/prob});};
   const p=norm(m.pm);
-  if(m.sport==='tennis'){add('Vainqueur','h',m.home,p.h);add('Vainqueur','a',m.away,p.a);
-    if(m.total){const t=norm({o:m.total.over,u:m.total.under}),L=String(m.total.line).replace('.',',');add('Jeux','o','Au moins '+(Math.floor(m.total.line)+1)+' jeux',t.o);add('Jeux','u',Math.floor(m.total.line)+' jeux ou moins',t.u);}
+  if(m.sport==='tennis'){add('Vainqueur','h',m.home+' gagne',p.h);add('Vainqueur','a',m.away+' gagne',p.a);
+    if(m.total){const t=norm({o:m.total.over,u:m.total.under});add('Jeux','o','Au moins '+(Math.floor(m.total.line)+1)+' jeux',t.o);add('Jeux','u',Math.floor(m.total.line)+' jeux ou moins',t.u);}
     return out;}
-  const b=m.book||{},side=p.h>=p.a?'h':'a',fav=side==='h'?m.home:m.away;
-  add('Résultat','h',m.home,p.h,{book:b.h,fav:side==='h',why:`${m.home} gagne ${odds1in(p.h)}`});add('Résultat','d','Nul',p.d,{book:b.d});add('Résultat','a',m.away,p.a,{book:b.a,fav:side==='a',why:`${m.away} gagne ${odds1in(p.a)}`});
-  add('Double chance','hd',m.home+' ou nul',p.h+p.d,{fav:side==='h',why:`${m.home} ne perd pas ${odds1in(p.h+p.d)}`});add('Double chance','da',m.away+' ou nul',p.a+p.d,{fav:side==='a',why:`${m.away} ne perd pas ${odds1in(p.a+p.d)}`});
-  if(m.total){const t=norm({o:m.total.over,u:m.total.under}),L=String(m.total.line).replace('.',',');const md0=model(m),xg=md0?` · ${(md0.lh+md0.la).toFixed(1).replace('.',',')} buts attendus`:'';add('Buts','o',atLeast(m.total.line),t.o,{book:m.total.line===2.5?b.over25:null,fav:true,why:'Marché Polymarket'+xg});add('Buts','u',atMost(m.total.line),t.u);}
-  const md=model(m);if(!md)return out;
-  if(m.total.line!==1.5)add('Buts','o15',atLeast(1.5),joint(md,'h',{minTotal:2}),{fav:true,why:`${(md.lh+md.la).toFixed(1).replace('.',',')} buts attendus`});
-  // les deux marquent
-  let btts=0;for(let i=1;i<=N;i++)for(let j=1;j<=N;j++)btts+=md.A[i]*md.B[j];add('Les deux marquent','btts','Les deux équipes marquent',btts,{book:b.btts});
-  // buteurs et décisifs (les deux équipes)
-  for(const s of ['h','a']){const team=s==='h'?m.home:m.away;
-    for(const pl of teamPlayers(team)){
-      if(pl.g>0)add('Buteurs',`g-${s}-${pl.name}`,pl.name+' buteur',joint(md,s,{share:pl.sg}),{margin:M_PLAYER,player:true,fav:s===side,why:pline(pl)});
-      if(pl.a>0||pl.l5a>0)add('Passeur',`a-${s}-${pl.name}`,pl.name+' passeur décisif',joint(md,s,{share:pl.sa}),{margin:M_PLAYER,player:true,why:pline(pl)});
-      if(pl.g+pl.a>0)add('Joueur décisif',`d-${s}-${pl.name}`,pl.name+' décisif (but ou passe)',joint(md,s,{share:pl.sd}),{margin:M_PLAYER,player:true,fav:s===side,why:pline(pl)});
-    }}
-  (m.scorers||[]).forEach((s,i)=>add('Buteurs','sc'+i,s.name+' buteur',Math.min(.9,1/s.odd/1.08),{book:s.odd,player:true}));
-  // MyMatch : le favori gagne + buts (+ joueur décisif), comme sur Winamax
-  const B=(key,picks,opt,why)=>add('MyMatch','mm-'+key,picks.join(' + '),joint(md,side,opt),{margin:M_BUILDER,builder:true,fav:true,picks,why});
-  // forme : buteur si le joueur marque au moins 1 match sur 2, sinon décisif (but ou passe), plus probable
-  // forme : buteur si le joueur enchaîne les buts, passeur s'il enchaîne les passes, sinon décisif (but ou passe), le plus probable
-  const star=teamPlayers(fav).filter(pl=>pl.g+pl.a>0).slice(0,2).map(pl=>{
-    const kind=pl.rg>=.45&&pl.rg>=1.5*pl.ra?'g':pl.ra>=.4&&pl.ra>=1.5*pl.rg?'a':'d';
-    return {...pl,kind,pickG:kind==='g',pick:pl.name+(kind==='g'?' buteur':kind==='a'?' passeur décisif':' décisif (but ou passe)'),sh:kind==='g'?pl.sg:kind==='a'?pl.sa:pl.sd};});
-  const form=pl=>pline(pl)+(pl.kind==='g'?' · en forme devant le but':pl.kind==='a'?' · en forme à la passe':'');
-  B('w3',[fav+' gagne',atLeast(2.5)],{win:true,minTotal:3},`${fav} gagne ${odds1in(p[side])}`);
-  star.forEach((pl,k)=>{
-    B('wp-'+k,[fav+' gagne',pl.pick],{win:true,share:pl.sh},form(pl));
-    if(pl.pickG)B('wd-'+k,[fav+' gagne',pl.name+' décisif (but ou passe)'],{win:true,share:pl.sd},pline(pl));
-    B('wp3-'+k,[fav+' gagne',pl.pick,atLeast(2.5)],{win:true,minTotal:3,share:pl.sh},form(pl));
-    const o=star[k+1];if(o)B('wpp-'+k,[fav+' gagne',pl.pick,o.pick],{win:true,share:pl.sh,share2:o.sh},form(pl)+' · '+pline(o));
-  });
-  return out;
-}
-const oddOf=s=>s.book||s.est;
+  add('Résultat','h',m.home+' gagne',p.h);add('Résultat','d','Match nul',p.d);add('Résultat','a',m.away+' gagne',p.a);
+  add('Double chance','hd',m.home+' ou nul',p.h+p.d);add('Double chance','da',m.away+' ou nul',p.a+p.d);add('Double chance','ha',m.home+' ou '+m.away,p.h+p.a);
+  if(m.total){const t=norm({o:m.total.over,u:m.total.under});add('Buts','o',atLeast(m.total.line),t.o);add('Buts','u',atMost(m.total.line),t.u);}
+  return out;}
 const now=()=>Date.now();
 const isLive=m=>{if(m.status==='finished')return false;const t=new Date(m.kickoff).getTime();return m.status==='live'||(now()>=t&&now()<t+(m.sport==='foot'?115:150)*60e3);};
 const isUp=m=>new Date(m.kickoff).getTime()>now();
@@ -323,61 +271,52 @@ function dayLabel(iso){const d=new Date(iso);const diff=Math.round((new Date(d.g
 const ago=iso=>{const m=Math.round((now()-new Date(iso))/60e3);return m<1?"à l'instant":m<60?`il y a ${m} min`:`il y a ${Math.round(m/60)} h`;};
 const favProb=m=>{const p=norm(m.pm);return Math.max(p.h,p.a);};
 
-/* ---------- combiné du jour ---------- */
-// Chaque niveau vise une cote ; on prend les favoris les plus nets et, pour chacun, le pari (simple ou MyMatch) dont la cote colle à l'objectif.
-const LEVELS=[{name:'Safe',target:2.5,legs:2,minFav:.6},{name:'Équilibré',target:8,legs:3,minFav:.52},{name:'Poker',target:25,legs:3,minFav:.5}];
-function pickFor(m,t){
-  // combinés façon tickets gagnants : le favori gagne + son joueur en forme (MyMatch), sinon le simple « gagne »
-  const all=selectionsOf(m).filter(s=>s.fav),withP=all.filter(s=>s.builder&&s.picks.some(x=>/buteur|décisif/.test(x)));
-  const c=withP.length?withP:all.filter(s=>s.market==='Résultat');
-  // on préfère les joueurs aux paris sur le nombre de buts
-  let best=null;for(const s of c){const cost=Math.abs(Math.log(oddOf(s)/t))-0.3*Math.log(s.prob*oddOf(s))+(s.picks.some(x=>/^Au moins/.test(x))?.2:0);if(!best||cost<best.cost)best={s,cost};}
-  return best&&best.s;}
-function buildCombo(lv){
-  const L=LEVELS[lv];
-  const scopes=[["aujourd'hui",m=>dayLabel(m.kickoff)==="Aujourd'hui"],['prochaines 30 h',m=>new Date(m.kickoff)-now()<30*3600e3],['à venir',()=>true]];
-  let res=null;
-  for(const [scope,f] of scopes){
-    const pool=matches.filter(m=>m.sport==='foot'&&isUp(m)&&f(m)&&favProb(m)>=L.minFav).sort((a,b)=>favProb(b)-favProb(a));
-    if(!pool.length)continue;
-    const n=Math.min(L.legs,pool.length),t=Math.pow(L.target,1/n);
-    const legs=pool.slice(0,n).map(m=>pickFor(m,t)).filter(Boolean);
-    const odd=legs.reduce((a,s)=>a*oddOf(s),1),prob=legs.reduce((a,s)=>a*s.prob,1);
-    res={legs,odd,prob,scope};if(legs.length>=Math.min(2,L.legs)&&odd>=L.target*.55)break;}
-  return res;}
-function renderCombo(){
-  $$('#seg button').forEach(b=>b.setAttribute('aria-selected',+b.dataset.level===level));
-  const c=buildCombo(level);
-  if(!c||!c.legs.length){$('#combo').innerHTML='<p class="hint" style="padding:16px 0">Pas assez de matchs à venir. Les prochaines cotes arrivent au prochain relevé.</p>';return;}
-  const rem=remaining();
-  $('#combo').innerHTML=`<div class="legs">${c.legs.map(s=>`<div class="leg"><div class="leg-top"><span class="match">${esc(s.match)}</span><span class="odd">${s.book?'':'≈'}${fx(oddOf(s))}</span></div><div class="picks">${s.picks.map(x=>`<span>${esc(x)}</span>`).join('')}</div><span class="why">${s.why?esc(s.why)+' · ':''}passe ${odds1in(s.prob)}</span></div>`).join('')}</div>
-   <div class="sumrow"><div class="sum"><span class="lbl">Cote totale</span><b>${fx(c.odd)}</b></div><div class="sum"><span class="lbl">Chance de passer</span><b>${pct(c.prob)}</b><div class="gauge"><i style="width:${Math.min(100,c.prob*100)}%"></i></div></div></div>
-   <div class="stake"><div class="stake-row"><span class="lbl">Mise</span><b id="cStakeTxt">${stake} €</b></div><input type="range" id="cStake" min="5" max="10" step="1" value="${stake}" aria-label="Mise"></div>
-   <div class="gain"><span class="lbl">Gains potentiels</span><b id="cGain">${eur(stake*c.odd)}</b></div>
-   <button class="cta" id="playCombo" ${rem<stake?'disabled':''}>${rem<stake?'Limite du jour atteinte':'Je joue ce combiné'}</button>
-   <button class="ghost" id="toTicket">Modifier dans le ticket</button>
-   <p class="hint">Combiné ${LEVELS[level].name} sur les matchs ${c.scope}. Cotes "≈" estimées : vérifie-les sur Winamax. Il passe en moyenne ${odds1in(c.prob)}.</p>`;
-  $('#cStake').oninput=e=>{stake=+e.target.value;$('#cStakeTxt').textContent=stake+' €';$('#cGain').textContent=eur(stake*c.odd);$('#playCombo').disabled=remaining()<stake;};
-  $('#playCombo').onclick=()=>logBet(c.legs.map(s=>s.label).join(' | '),+c.odd.toFixed(2),stake);
-  $('#toTicket').onclick=()=>{ticket=[];c.legs.forEach(s=>addLeg(s,true));saveTicket();renderAll();go('ticket');};
-}
+/* ---------- paris du jour ---------- */
+// Un pari par match dans les 36 h : la victoire si elle passe au moins 55 % du temps, sinon double chance ou buts.
+// Au-dessus de 88 %, la cote est trop petite pour battre la marge du bookmaker.
+const RANK={'Résultat':0,'Vainqueur':0,'Double chance':1,'Buts':2,'Jeux':2};
+function dayPicks(){
+  const out=[];
+  // prix de plus de 3 h sans mise à jour en direct : trop vieux pour parier dessus
+  const fresh=m=>m._live||(feed&&now()-new Date(feed.updatedAt)<3*3600e3);
+  for(const m of matches.filter(m=>isUp(m)&&fresh(m)&&new Date(m.kickoff)-now()<36*3600e3)){
+    const ok=selectionsOf(m).filter(s=>s.prob>=P_MIN&&s.prob<=P_MAX&&s.label!=='Match nul').sort((a,b)=>RANK[a.market]-RANK[b.market]||b.prob-a.prob);
+    if(ok.length)out.push(ok[0]);}
+  return out.sort((a,b)=>b.prob-a.prob).slice(0,8);}
+function verdict(p,o,st){
+  if(!(o>1))return '<p class="verdict">Tape la cote de ton site pour savoir si on joue.</p>';
+  const ev=p*o-1;if(ev<EDGE)return `<p class="verdict no">Cote trop basse (${ev>=0?'+':''}${Math.round(ev*100)} %) : on ne joue pas.</p>`;
+  if(ev>MAX_EDGE)return '<p class="verdict no">Écart trop grand pour être vrai : vérifie la cote et le match. On ne joue pas.</p>';
+  return st>0?`<p class="verdict ok">Value +${Math.round(ev*100)} % · mise conseillée ${eur(st)}</p>`:'<p class="verdict no">Value, mais limite du jour ou bankroll trop basse : on passe.</p>';}
+function pickCard(s){const o=state.odds[s.id],st=stakeFor(s.prob,o);
+  return `<div class="leg"><div class="leg-top"><span class="match">${esc(s.match)}</span><span class="when">${esc(dayLabel(s.kickoff)==="Aujourd'hui"?'':dayLabel(s.kickoff)+' ')}${hm(s.kickoff)}</span></div>
+   <div class="picks"><span>${esc(s.label)}</span></div>
+   <span class="why">Passe environ ${Math.round(s.prob*10)} fois sur 10 (${pct(s.prob)}) · cote juste ${fx(s.fair)}</span>
+   <div class="need"><span>Joue seulement si ton site paie au moins <b>${fx(s.min)}</b></span><input class="f" inputmode="decimal" data-podd="${esc(s.id)}" value="${o?String(o).replace('.',','):''}" placeholder="Ta cote" aria-label="Cote de ton site"></div>
+   ${verdict(s.prob,o,st)}${st>0?`<button class="cta" data-play="${esc(s.id)}">Je joue ${eur(st)}</button>`:''}</div>`;}
+function renderPicks(){
+  const ps=dayPicks();
+  $('#combo').innerHTML=ps.length?`<p class="hint">Un pari = une sélection. Regarde la cote sur ton site : si elle est au moins égale au minimum, l'agent te donne la mise. Sinon on passe.</p><div class="legs">${ps.map(pickCard).join('')}</div>`
+   :'<p class="hint" style="padding:16px 0">Aucun pari assez sûr avec des prix frais pour l\'instant. Les prochaines cotes arrivent au prochain relevé.</p>';}
+$('#combo').addEventListener('input',e=>{const id=e.target.dataset.podd;if(!id)return;const v=num(e.target.value);if(v>1)state.odds[id]=v;else delete state.odds[id];persist();
+  clearTimeout(renderPicks.t);renderPicks.t=setTimeout(()=>{renderPicks();const el=document.querySelector(`[data-podd="${CSS.escape(id)}"]`);if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length);}},900);});
 
 /* ---------- matchs ---------- */
-function oddBtn(s,k){return `<button class="ob ${ticket.some(t=>t.id===s.id)?'on':''}" data-sel="${esc(s.id)}"><span class="k">${esc(k??s.label)}</span><span class="v">${s.book?'':'≈'}${fx(oddOf(s))}</span></button>`;}
+function oddBtn(s,k){return `<button class="ob ${ticket.some(t=>t.id===s.id)?'on':''}" data-sel="${esc(s.id)}"><span class="k">${esc(k??s.label)}</span><span class="v">${fx(s.fair)}</span></button>`;}
 function matchCard(m){
   const sels=selectionsOf(m),get=k=>sels.find(s=>s.id===m.id+':'+k),live=isLive(m);
   const main=m.sport==='foot'?[['h','1'],['d','N'],['a','2']]:[['h',m.home.split(' ').slice(-1)[0]],['a',m.away.split(' ').slice(-1)[0]]];
   const mid=m.status==='finished'&&m.score?`<span class="score">${esc(m.score)}</span><span class="d">Terminé</span>`:live?`${(m.score||m.sport==='foot')?`<span class="score">${esc(m.score||'0-0')}</span>`:'<span class="t">–</span>'}<span class="livetag">${m.minute?esc(m.minute):'LIVE'}</span>`:`<span class="t">${hm(m.kickoff)}</span><span class="d">${esc(dayLabel(m.kickoff)==="Aujourd'hui"?'Aujourd\'hui':dayLabel(m.kickoff).split(' ').slice(0,2).join(' '))}</span>`;
   let body='';const extra=sels.filter(s=>!['h','d','a'].some(k=>s.id===m.id+':'+k));
   if(open.has(m.id)){const g={};extra.forEach(s=>(g[s.market]=g[s.market]||[]).push(s));
-    const order=['MyMatch','Joueur décisif','Buteurs','Passeur','Buts','Double chance','Les deux marquent','Jeux'];
-    body=`<div class="mkts">${order.filter(k=>g[k]).map(k=>`<div class="mkt"><span class="lbl">${esc(k)}</span><div class="${k==='MyMatch'?'':'grid2'}" style="display:grid;gap:6px;${k==='MyMatch'?'':'grid-template-columns:1fr 1fr'}">${g[k].sort((a,b)=>b.prob-a.prob).slice(0,k==='MyMatch'?6:8).map(s=>`<div>${oddBtn(s,s.label)}${s.player?`<div class="pstat" style="text-align:center">${esc(s.why)}</div>`:''}</div>`).join('')}</div></div>`).join('')}${m.notes?`<p class="hint" style="text-align:center">${esc(m.notes)}</p>`:''}</div>`;}
+    const order=['Double chance','Buts','Jeux'];
+    body=`<div class="mkts">${order.filter(k=>g[k]).map(k=>`<div class="mkt"><span class="lbl">${esc(k)}</span><div class="${k==='MyMatch'?'':'grid2'}" style="display:grid;gap:6px;${k==='MyMatch'?'':'grid-template-columns:1fr 1fr'}">${g[k].map(s=>`<div>${oddBtn(s,s.label)}</div>`).join('')}</div></div>`).join('')}${m.notes?`<p class="hint" style="text-align:center">${esc(m.notes)}</p>`:''}</div>`;}
   return `<div class="mcard"><button class="mtop" data-open="${esc(m.id)}" aria-expanded="${open.has(m.id)}"><span class="team th">${esc(m.home)}</span><span class="mid">${mid}</span><span class="team ta">${esc(m.away)}</span></button>
    <div class="odds3" style="--n:${main.length}">${main.map(([k,l])=>get(k)?oddBtn(get(k),l):'').join('')}</div>
-   ${extra.length?`<button class="more" data-open="${esc(m.id)}">${open.has(m.id)?'Masquer':`+ ${extra.length} paris · buteurs, MyMatch, buts`}</button>`:''}${body}</div>`;
+   ${extra.length?`<button class="more" data-open="${esc(m.id)}">${open.has(m.id)?'Masquer':`+ ${extra.length} paris · double chance, buts`}</button>`:''}${body}</div>`;
 }
 function byComp(list){const g=[];list.forEach(m=>{let x=g.find(y=>y.c===m.league);if(!x)g.push(x={c:m.league,ms:[]});x.ms.push(m);});return g;}
-function renderHome(){renderCombo();
+function renderHome(){renderPicks();
   $('#chips').innerHTML=[['all','Tout'],['today',"Aujourd'hui"],['Ligue des champions','C1'],['Ligue 1','Ligue 1'],['Premier League','Premier League'],['Liga','Liga'],['Serie A','Serie A'],['tennis','Tennis']].map(([k,l])=>`<button class="chip" data-filter="${esc(k)}" aria-pressed="${filter===k}">${esc(l)}</button>`).join('');
   const list=matches.filter(m=>isUp(m)||isLive(m)).filter(m=>filter==='all'||(filter==='today'?dayLabel(m.kickoff)==="Aujourd'hui":filter==='tennis'?m.sport==='tennis':m.league===filter)).sort((a,b)=>(isLive(b)-isLive(a))||new Date(a.kickoff)-new Date(b.kickoff));
   $('#all').innerHTML=list.length?byComp(list).map(g=>`<div class="comp"><div class="comp-h"><span>${esc(g.c)}</span><span>${g.ms.length}</span></div>${g.ms.map(matchCard).join('')}</div>`).join(''):'<p class="empty">Aucun match pour ce filtre.</p>';}
@@ -388,53 +327,58 @@ function renderMatchs(){
 
 /* ---------- ticket ---------- */
 function findSel(id){const m=matches.find(x=>x.id===id.split(':')[0]);return m?selectionsOf(m).find(s=>s.id===id):null;}
-function addLeg(s,silent){if(ticket.some(t=>t.id===s.id))return;const i=ticket.findIndex(t=>t.mid===s.mid);if(i>=0){ticket.splice(i,1);if(!silent)toast('Un pari par match : remplacé (utilise un MyMatch pour en combiner)');}
-  ticket.push({id:s.id,mid:s.mid,match:s.match,label:s.label,market:s.market,prob:s.prob,fair:s.fair,odd:s.book?+s.book.toFixed(2):null,est:+s.est.toFixed(2)});saveTicket();if(!silent)toast('Ajouté au ticket');}
+function addLeg(s,silent){if(ticket.some(t=>t.id===s.id))return;const i=ticket.findIndex(t=>t.mid===s.mid);
+  if(i>=0){ticket.splice(i,1);if(!silent)toast('Un pari par match : remplacé');}
+  else if(ticket.length>=MAX_LEGS){toast('2 sélections maximum');return;}
+  ticket.push({id:s.id,mid:s.mid,match:s.match,label:s.label,market:s.market,prob:s.prob,fair:s.fair,min:s.min});saveTicket();if(!silent)toast('Ajouté au ticket');}
+function ticketCalc(){const legs=ticket.map(t=>({...t,o:state.odds[t.id]}));const all=legs.every(l=>l.o>1);
+  const odd=all?legs.reduce((a,l)=>a*l.o,1):NaN,prob=legs.reduce((a,l)=>a*l.prob,1);
+  // en combiné, chaque sélection doit avoir sa propre value : pas de sélection faible cachée derrière une bonne
+  const each=all&&legs.every(l=>l.prob*l.o>=1+EDGE);return {legs,all,odd,prob,st:each?stakeFor(prob,odd):0};}
 function renderTicket(){
   $('#badge').hidden=!ticket.length;$('#badge').textContent=ticket.length;
-  if(!ticket.length){$('#ticket').innerHTML='<h2>Mon ticket</h2><p class="hint" style="text-align:center;padding:20px 0">Touche une cote dans Matchs, ou charge le combiné du jour.</p>';return;}
-  const legs=ticket.map(t=>({...t,o:t.odd||t.est}));const odd=legs.reduce((a,l)=>a*l.o,1),prob=legs.reduce((a,l)=>a*l.prob,1),rem=remaining();
-  $('#ticket').innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center"><h2>Mon ticket</h2><button class="mini" data-clear>Vider</button></div>
-   <div>${legs.map((l,i)=>{const e=l.prob*l.o-1;return `<div class="tleg"><span class="m">${esc(l.match)} · ${esc(l.market)}</span><span class="s">${esc(l.label)}</span><input class="f" inputmode="decimal" data-odd="${i}" value="${l.odd?String(l.odd).replace('.',','):''}" placeholder="≈${fx(l.est)}" aria-label="Cote Winamax"><button class="x" data-rm="${i}" aria-label="Retirer">×</button><span class="v ${l.odd&&e>0?'val':''}">Passe ${odds1in(l.prob)} · cote juste ${fx(l.fair)}${l.odd?(e>0?` · value +${Math.round(e*100)} %`:' · pas de value'):' · tape ta cote Winamax'}</span></div>`;}).join('')}</div>
-   <div class="sumrow"><div class="sum"><span class="lbl">Cote totale</span><b>${fx(odd)}</b></div><div class="sum"><span class="lbl">Chance de passer</span><b>${pct(prob)}</b><div class="gauge"><i style="width:${Math.min(100,prob*100)}%"></i></div></div></div>
-   <div class="stake"><div class="stake-row"><span class="lbl">Mise</span><b id="tStakeTxt">${stake} €</b></div><input type="range" id="tStake" min="5" max="10" step="1" value="${stake}" aria-label="Mise"></div>
-   <div class="gain"><span class="lbl">Gains potentiels</span><b id="tGain">${eur(stake*odd)}</b></div>
-   <button class="cta" data-log ${rem<stake?'disabled':''}>${rem<stake?'Limite du jour atteinte':'Je joue ce ticket'}</button>`;
-  $('#tStake').oninput=e=>{stake=+e.target.value;$('#tStakeTxt').textContent=stake+' €';$('#tGain').textContent=eur(stake*odd);$('[data-log]').disabled=remaining()<stake;};
+  if(!ticket.length){$('#ticket').innerHTML='<h2>Vérifier un pari</h2><p class="hint" style="text-align:center;padding:20px 0">Touche une cote dans un match pour la vérifier ici. Une sélection conseillée, deux au maximum.</p>';return;}
+  const {legs,all,odd,prob,st}=ticketCalc();
+  $('#ticket').innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center"><h2>Vérifier un pari</h2><button class="mini" data-clear>Vider</button></div>
+   <div>${legs.map((l,i)=>{const e=l.o>1?l.prob*l.o-1:null;return `<div class="tleg"><span class="m">${esc(l.match)} · ${esc(l.market)}</span><span class="s">${esc(l.label)}</span><input class="f" inputmode="decimal" data-odd="${esc(l.id)}" value="${l.o?String(l.o).replace('.',','):''}" placeholder="Ta cote" aria-label="Cote de ton site"><button class="x" data-rm="${i}" aria-label="Retirer">×</button><span class="v ${e!=null&&e>=EDGE?'val':''}">Passe ${pct(l.prob)} · cote juste ${fx(l.fair)} · minimum ${fx(l.min)}${e==null?'':e>=EDGE?` · value +${Math.round(e*100)} %`:' · pas de value'}</span></div>`;}).join('')}</div>
+   <div class="sumrow"><div class="sum"><span class="lbl">Cote totale</span><b>${all?fx(odd):'—'}</b></div><div class="sum"><span class="lbl">Chance de passer</span><b>${pct(prob)}</b><div class="gauge"><i style="width:${Math.min(100,prob*100)}%"></i></div></div></div>
+   ${all&&legs.length>1&&!st&&prob*odd>=1+EDGE?'<p class="verdict no">Une des sélections n\'a pas de value : retire-la.</p>':verdict(prob,all?odd:NaN,st)}
+   ${st>0?`<div class="gain"><span class="lbl">Gains potentiels</span><b>${eur(st*odd)}</b></div><button class="cta" data-log>Je joue ${eur(st)}</button>`:''}
+   ${legs.length>1?'<p class="hint">À deux sélections, la marge du bookmaker est payée deux fois. Une seule, c\'est mieux.</p>':''}`;
 }
-$('#ticket').addEventListener('input',e=>{const i=e.target.dataset.odd;if(i==null)return;const v=num(e.target.value);ticket[+i].odd=v>1?v:null;saveTicket();
-  clearTimeout(renderTicket.t);renderTicket.t=setTimeout(()=>{renderTicket();const el=$(`[data-odd="${i}"]`);if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length);}},800);});
+$('#ticket').addEventListener('input',e=>{const id=e.target.dataset.odd;if(!id)return;const v=num(e.target.value);if(v>1)state.odds[id]=v;else delete state.odds[id];persist();
+  clearTimeout(renderTicket.t);renderTicket.t=setTimeout(()=>{renderAll();const el=$(`#ticket [data-odd="${CSS.escape(id)}"]`);if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length);}},900);});
 $('#ticket').addEventListener('click',e=>{const t=e.target;
   if(t.dataset.rm!=null){ticket.splice(+t.dataset.rm,1);saveTicket();renderAll();}
   if(t.hasAttribute('data-clear')){ticket=[];saveTicket();renderAll();}
-  if(t.hasAttribute('data-log')){const odd=ticket.reduce((a,l)=>a*(l.odd||l.est),1);if(logBet(ticket.map(l=>l.label).join(' | '),+odd.toFixed(2),stake)){ticket=[];saveTicket();renderAll();}}});
+  if(t.hasAttribute('data-log')){const c=ticketCalc();if(c.st>0&&logBet(ticket.map(l=>l.match+' · '+l.label).join(' | '),+c.odd.toFixed(2),c.st,c.prob)){ticket=[];saveTicket();renderAll();}}});
 
 /* ---------- profil ---------- */
-function logBet(label,odds,st){st=clampStake(st);if(st>remaining()){toast('Limite du jour atteinte');return false;}
-  state.bets.push({id:Date.now().toString(36),date:new Date().toISOString(),label,odds,stake:st,status:'pending'});
-  state.bankroll=+(state.bankroll-st).toFixed(2);if(state.bets.length>300)state.bets=state.bets.slice(-300);persist();renderAll();toast(`Pari de ${st} € noté`);return true;}
+function logBet(label,odds,st,p){if(!(st>0)||st>remaining()+1e-9){toast('Limite du jour atteinte');return false;}
+  state.bets.push({id:Date.now().toString(36),date:new Date().toISOString(),label,odds,stake:st,p,status:'pending'});
+  state.bankroll=r2(state.bankroll-st);if(state.bets.length>300)state.bets=state.bets.slice(-300);persist();renderAll();toast(`Pari de ${eur(st)} noté`);return true;}
 function renderMoi(){
-  const settled=state.bets.filter(b=>b.status==='won'||b.status==='lost'),won=settled.filter(b=>b.status==='won').length,profit=settled.reduce((s,b)=>s+pl(b),0);
-  $('#stats').innerHTML=`<div class="stat"><span class="lbl">Bankroll</span><b>${eur(state.bankroll)}</b></div><div class="stat"><span class="lbl">Bénéfice</span><b class="${profit>=0?'up':'down'}">${profit>=0?'+':''}${eur(profit)}</b></div><div class="stat"><span class="lbl">Gagnés</span><b>${won} / ${settled.length}</b></div><div class="stat"><span class="lbl">Encore jouable</span><b>${eur(remaining(),0)}</b></div>`;
-  const el=document.activeElement;if(el!==$('#sBank'))$('#sBank').value=state.bankroll;if(el!==$('#sDaily'))$('#sDaily').value=state.dailyLimit;
-  $('#defStake').value=state.stake;$('#defStakeTxt').textContent=state.stake+' €';
+  const settled=state.bets.filter(b=>b.status==='won'||b.status==='lost'),won=settled.filter(b=>b.status==='won').length,profit=settled.reduce((s,b)=>s+pl(b),0),staked=settled.reduce((s,b)=>s+b.stake,0);
+  // gain attendu : ce que les paris auraient dû rapporter en moyenne ; le vrai bénéfice s'en approche seulement sur beaucoup de paris
+  const exp=settled.reduce((s,b)=>s+(b.p?b.stake*(b.p*b.odds-1):0),0);
+  $('#stats').innerHTML=`<div class="stat"><span class="lbl">Bankroll</span><b>${eur(state.bankroll)}</b></div><div class="stat"><span class="lbl">Bénéfice</span><b class="${profit>=0?'up':'down'}">${profit>=0?'+':''}${eur(profit)}</b></div><div class="stat"><span class="lbl">Gagnés</span><b>${won} / ${settled.length}</b></div><div class="stat"><span class="lbl">Bénéfice attendu</span><b>${exp>=0?'+':''}${eur(exp)}</b></div><div class="stat"><span class="lbl">Rendement</span><b>${staked?(profit>=0?'+':'')+Math.round(profit/staked*100)+' %':'—'}</b></div><div class="stat"><span class="lbl">Encore jouable</span><b>${eur(remaining())}</b></div>`;
+  const el=document.activeElement;if(el!==$('#sBank'))$('#sBank').value=String(state.bankroll).replace('.',',');if(el!==$('#sDaily'))$('#sDaily').value=String(state.dailyLimit).replace('.',',');if(el!==$('#sMin'))$('#sMin').value=String(state.minStake).replace('.',',');
   const rows=[...state.bets].reverse();
-  $('#hist').innerHTML=rows.length?rows.map(b=>{const v=pl(b);return `<div class="h"><span class="l">${esc(b.label)}<br><span class="muted" style="font-size:.76rem">${new Date(b.date).toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'})} · cote ${fx(b.odds)} · ${b.stake} €</span></span><span class="r ${v>0?'up':v<0?'down':''}">${b.status==='pending'?'en cours':b.status==='void'?'annulé':(v>0?'+':'')+eur(v)}</span>${b.status==='pending'?`<span class="a"><button class="mini" data-res="${b.id}|won">Gagné</button><button class="mini" data-res="${b.id}|lost">Perdu</button><button class="mini" data-res="${b.id}|void">Annulé</button></span>`:''}</div>`;}).join(''):'<p class="hint" style="text-align:center">Aucun pari noté pour l\'instant.</p>';
-  const stop=$('#stop');stop.hidden=remaining()>=MIN_STAKE;if(!stop.hidden)stop.innerHTML='<b>Stop pour aujourd\'hui.</b> Ta limite de perte est atteinte. Les matchs de demain seront toujours là.';
+  $('#hist').innerHTML=rows.length?rows.map(b=>{const v=pl(b);return `<div class="h"><span class="l">${esc(b.label)}<br><span class="muted" style="font-size:.76rem">${new Date(b.date).toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'})} · cote ${fx(b.odds)} · ${eur(b.stake)}${b.p?' · passe '+pct(b.p):''}</span></span><span class="r ${v>0?'up':v<0?'down':''}">${b.status==='pending'?'en cours':b.status==='void'?'annulé':(v>0?'+':'')+eur(v)}</span>${b.status==='pending'?`<span class="a"><button class="mini" data-res="${b.id}|won">Gagné</button><button class="mini" data-res="${b.id}|lost">Perdu</button><button class="mini" data-res="${b.id}|void">Annulé</button></span>`:''}</div>`;}).join(''):'<p class="hint" style="text-align:center">Aucun pari noté pour l\'instant.</p>';
+  const stop=$('#stop');stop.hidden=remaining()>=state.minStake;if(!stop.hidden)stop.innerHTML=state.bankroll<state.minStake?'<b>Bankroll vide.</b> On ne recharge pas pour se refaire : on fait une pause.':'<b>Stop pour aujourd\'hui.</b> Ta limite de perte est atteinte. Les matchs de demain seront toujours là.';
 }
-$('#defStake').addEventListener('input',e=>{state.stake=+e.target.value;$('#defStakeTxt').textContent=state.stake+' €';stake=state.stake;});
-$('#save').addEventListener('click',()=>{const b=num($('#sBank').value),d=num($('#sDaily').value);if(!(b>=0)||!(d>=0)){toast('Valeurs invalides');return;}state.bankroll=b;state.dailyLimit=d;persist();renderAll();toast('Enregistré');});
+$('#save').addEventListener('click',()=>{const b=num($('#sBank').value),d=num($('#sDaily').value),mn=num($('#sMin').value);if(!(b>=0)||!(d>=0)||!(mn>0)){toast('Valeurs invalides');return;}state.bankroll=r2(b);state.dailyLimit=r2(d);state.minStake=r2(mn);persist();renderAll();toast('Enregistré');});
 $('#hist').addEventListener('click',e=>{const b=e.target.closest('[data-res]');if(!b)return;const [id,res]=b.dataset.res.split('|');const bet=state.bets.find(x=>x.id===id);if(!bet||bet.status!=='pending')return;
-  bet.status=res;if(res==='won')state.bankroll+=bet.stake*bet.odds;if(res==='void')state.bankroll+=bet.stake;state.bankroll=+state.bankroll.toFixed(2);persist();renderAll();});
+  bet.status=res;if(res==='won')state.bankroll+=bet.stake*bet.odds;if(res==='void')state.bankroll+=bet.stake;state.bankroll=r2(state.bankroll);persist();renderAll();});
 
 /* ---------- navigation ---------- */
 function go(v){$$('.tabbar button').forEach(b=>b.setAttribute('aria-selected',b.dataset.go===v));$$('.app > .screen').forEach(s=>s.hidden=s.id!=='s-'+v);window.scrollTo(0,0);try{localStorage.setItem('bb-view',v);}catch(e){}}
-document.addEventListener('click',e=>{const t=e.target.closest('[data-go],[data-open],[data-sel],[data-filter],[data-level]');if(!t)return;
+document.addEventListener('click',e=>{const t=e.target.closest('[data-go],[data-open],[data-sel],[data-filter],[data-play]');if(!t)return;
   if(t.dataset.go)go(t.dataset.go);
   else if(t.dataset.open){open.has(t.dataset.open)?open.delete(t.dataset.open):open.add(t.dataset.open);renderHome();renderMatchs();}
   else if(t.dataset.sel){const s=findSel(t.dataset.sel);if(!s)return;const i=ticket.findIndex(x=>x.id===s.id);if(i>=0){ticket.splice(i,1);saveTicket();toast('Retiré du ticket');}else addLeg(s);renderAll();}
   else if(t.dataset.filter){filter=t.dataset.filter;renderHome();}
-  else if(t.dataset.level!=null){level=+t.dataset.level;renderCombo();}});
+  else if(t.dataset.play){const s=findSel(t.dataset.play),o=state.odds[t.dataset.play];if(!s)return;const st=stakeFor(s.prob,o);if(st>0)logBet(s.match+' · '+s.label,o,st,s.prob);}});
 try{const v=localStorage.getItem('bb-view');if(v&&$('#s-'+v))go(v);}catch(e){}
 
 function renderFresh(){if(!feed)return;const t=feed.liveAt||feed.updatedAt;$('#dot').className='dot'+(now()-new Date(t)>10*60e3?' old':'');$('#fresh').textContent=(feed.liveAt?'En direct · ':'Cotes ')+ago(t);}
@@ -458,8 +402,10 @@ let liveOk={scores:false,odds:false};
 async function loadFeed(){
   try{const f=await getJSON('feed.json?t='+Date.now());
     const keep=new Map(matches.map(m=>[m.id,{score:m.score,minute:m.minute,status:m.status,pm:m._live&&m.pm,_live:m._live}]));
-    feed=Object.assign(f,{liveAt:feed&&feed.liveAt});players=f.players||{};applyPlayers();
+    feed=Object.assign(f,{liveAt:feed&&feed.liveAt});
     matches=(f.matches||[]).filter(m=>m&&m.pm&&m.kickoff).map(m=>{const k=keep.get(m.id);if(k&&k._live){m.pm=k.pm||m.pm;m._live=true;}if(k&&k.score&&!m.score){m.score=k.score;m.minute=k.minute;m.status=k.status;}return m;});
+    // on oublie les cotes tapées pour les matchs qui ne sont plus dans le relevé
+    const ids=new Set(matches.map(m=>m.id));for(const k of Object.keys(state.odds))if(!ids.has(k.split(':')[0]))delete state.odds[k];
     renderAll();}catch(e){if(!feed)$('#fresh').textContent='Pas de connexion';}}
 
 async function liveScores(){
@@ -494,40 +440,6 @@ async function liveOdds(){
   liveOk.odds=got>0;}
 
 
-/* joueurs : effectif + stats saison ESPN pour chaque équipe du relevé, forme des 5 derniers matchs des meilleurs joueurs.
-   Mis en cache 3 h sur le téléphone ; le relevé (renderfoot) reste la base si ESPN ne répond pas. */
-const pool=async(items,n,fn)=>{let i=0;await Promise.all(Array.from({length:n},async()=>{while(i<items.length){const k=i++;try{await fn(items[k]);}catch(e){}}}));};
-let livePlayers=null;
-function applyPlayers(){if(!livePlayers)return;players=Object.assign({},(feed&&feed.players)||{});for(const [t,l] of Object.entries(livePlayers))if(l.length)players[t]=l;}
-async function loadPlayers(){
-  try{const c=JSON.parse(localStorage.getItem('bb-pl')||'null');if(c&&Date.now()-c.at<3*3600e3){livePlayers=c.data;applyPlayers();renderAll();return;}}catch(e){}
-  const ids={};// équipe du relevé -> {id, lg}
-  const days=[0,1,2,3].map(d=>new Date(Date.now()+d*864e5).toISOString().slice(0,10).replace(/-/g,''));
-  const jobs=[];for(const lg of Object.values(ESPN))for(const d of days)jobs.push([lg,d]);
-  await pool(jobs,6,async([lg,d])=>{const j=await getJSON(`https://site.api.espn.com/apis/site/v2/sports/soccer/${lg}/scoreboard?dates=${d}`);
-    for(const ev of j.events||[]){const c=ev.competitions&&ev.competitions[0];if(!c)continue;const H=c.competitors.find(x=>x.homeAway==='home'),A=c.competitors.find(x=>x.homeAway==='away');if(!H||!A)continue;
-      const m=findMatch(H.team.displayName,A.team.displayName);if(!m)continue;const sw=sameTeam(m.home,H.team.displayName)?0:1;
-      // le championnat national passe avant la C1 (plus de matchs, donc des stats plus fiables)
-      const set=(t,id)=>{if(!ids[t]||(ids[t].lg==='uefa.champions'&&lg!=='uefa.champions'))ids[t]={id,lg};};
-      set(sw?m.away:m.home,H.team.id);set(sw?m.home:m.away,A.team.id);}});
-  const data={},pids={};
-  await pool(Object.entries(ids),6,async([team,{id,lg}])=>{const r=await getJSON(`https://site.api.espn.com/apis/site/v2/sports/soccer/${lg}/teams/${id}/roster`);
-    const list=[];for(const a of r.athletes||[]){const o={};for(const c of a.statistics?.splits?.categories||[])for(const x of c.stats)o[x.name]=x.value;
-      const g=o.totalGoals||0,ap=o.goalAssists||0,md=o.appearances||0;if(!(g+ap>0&&md>0))continue;
-      list.push({name:a.displayName,g,a:ap,md,out:!!((a.injuries||[]).length||(a.status&&a.status.type&&a.status.type!=='active')),_id:a.id,_lg:lg});}
-    // classement : buts + passes, lissé pour qu'un joueur à 1 match ne passe pas devant un titulaire
-    list.sort((x,y)=>(y.g+y.a)/(y.md+3)-(x.g+x.a)/(x.md+3));data[team]=list.slice(0,6);});
-  // forme récente : 3 meilleurs joueurs des équipes qui jouent dans les 2 jours
-  const soon=new Set(matches.filter(m=>m.sport==='foot'&&new Date(m.kickoff)-now()<48*3600e3).flatMap(m=>[m.home,m.away]));
-  const gl=[];for(const [t,l] of Object.entries(data))if(soon.has(t))l.filter(p=>!p.out).slice(0,3).forEach(p=>gl.push(p));
-  await pool(gl,6,async p=>{const j=await getJSON(`https://site.web.api.espn.com/apis/common/v3/sports/soccer/${p._lg}/athletes/${p._id}/gamelog`);
-    const iG=(j.names||[]).indexOf('totalGoals'),iA=(j.names||[]).indexOf('goalAssists');if(iG<0)return;
-    const evs=((j.seasonTypes||[])[0]?.categories||[]).flatMap(c=>c.events||[]).slice(0,5);if(!evs.length)return;
-    p.l5n=evs.length;p.l5g=evs.reduce((s,e)=>s+(+e.stats[iG]||0),0);p.l5a=evs.reduce((s,e)=>s+(+e.stats[iA]||0),0);});
-  for(const l of Object.values(data))l.forEach(p=>{delete p._id;delete p._lg;});
-  if(Object.keys(data).length){livePlayers=data;try{localStorage.setItem('bb-pl',JSON.stringify({at:Date.now(),data}));}catch(e){}applyPlayers();renderAll();}
-}
-
 async function tick(){
   if(document.hidden)return;
   await Promise.all([liveScores(),liveOdds()]);
@@ -535,7 +447,7 @@ async function tick(){
   renderAll();
   $('#storeInfo').textContent='Sauvegardé sur ce téléphone. Direct : scores '+(liveOk.scores?'OK':'indisponibles')+', cotes '+(liveOk.odds?'OK':'indisponibles')+'.';}
 
-(async()=>{await loadFeed();await tick();loadPlayers();setInterval(loadPlayers,3600e3);
+(async()=>{await loadFeed();await tick();
   setInterval(tick,60e3);setInterval(loadFeed,15*60e3);
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)tick();});})();
 })();
